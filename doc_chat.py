@@ -3,6 +3,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
 import os
 
+#Loads File with .pdf, .docx, and .txt extensions
 def load_file(file):
     import os
     name, extension = os.path.splitext(file)
@@ -32,9 +33,13 @@ def delete_pinecone_index(index_name = "docchatapp1551v2"):
     import pinecone
     from pinecone import Pinecone
     pc = Pinecone(api_key=os.environ.get('PINECONE_API_KEY'))
+    if index_name in pc.list_indexes().names():
+        print(f'Deleting index {index_name}...',end = '')
+        pc.delete_index(index_name)
+    else:
+        print(f'Index {index_name} not found')
 
-    print(f'Deleting index {index_name}...',end = '')
-    pc.delete_index(index_name)
+
 
 
 def fetch_and_store_embeddings(chunks, index_name = "docchatapp1551v2"):
@@ -61,24 +66,25 @@ def fetch_and_store_embeddings(chunks, index_name = "docchatapp1551v2"):
         return vector_store
 
 
-
-
+#Function to chunk document
 def chunk_data(data, chunk_size = 256, chunk_overlap = 10):
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     text_splitter = RecursiveCharacterTextSplitter(chunk_size = chunk_size, chunk_overlap = chunk_overlap)
     chunks =text_splitter.split_documents(data)
     return chunks
 
+#Queries the Vector Store using RetrievalQA
 def ask_and_get_answer(vector_store, q, k = 3):
     from langchain.chains import RetrievalQA
     from langchain_openai import ChatOpenAI
 
-    llm = ChatOpenAI(model = 'gpt-3.5-turbo', temperature = 0.5)
+    llm = ChatOpenAI(model = 'gpt-3.5-turbo', temperature = 0.1)
     retriever = vector_store.as_retriever(search_type = 'similarity', search_kwards = {'k' : k})
     chain = RetrievalQA.from_chain_type(llm = llm, chain_type = "stuff", retriever = retriever)
     answer = chain.run(q)
     return answer
 
+#Calculate the cost of embedding the text
 def get_embedding_cost(texts):
     import tiktoken
     enc = tiktoken.encoding_for_model('text-embedding-ada-002')
@@ -90,9 +96,8 @@ def clear_history():
     if 'history' in st.session_state:
         del st.session_state['history']
         delete_pinecone_index()
+
     
-
-
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv, find_dotenv
@@ -121,7 +126,7 @@ if __name__ == "__main__":
         uploaded_file = st.file_uploader('Upload a file: ', type = ['pdf', 'docx', 'txt'])
         chunk_size = st.number_input('Chunk size:', min_value = 100, max_value = 2048, value = 512, on_change = clear_history)
         k = st.number_input('k', min_value = 1, max_value = 20, value = 3, on_change = clear_history)
-        add_data = st.button('Add Data', on_click = clear_history)
+        add_data = st.button('Upload File', on_click = clear_history)
 
         if uploaded_file and add_data:
             with st.spinner('Processing File...'):
@@ -142,22 +147,25 @@ if __name__ == "__main__":
                     st.success('Document processed, chunked, and vectorized successfully')
                 else:
                     st.write('Error: Document not processed')
-    q = st.text_input('Ask the Expert a question from the content of your file:')
-    if q:
+    query = st.text_input('Ask the Expert a question from the content of your file:')
+    if query:
         if 'vs' in st.session_state:
             vector_store = st.session_state.vs
             # st.write(f'k: {k}')
-            answer = ask_and_get_answer(vector_store,q,k)
-            st.text_area('LLM Answer: ',answer)
+            answer = ask_and_get_answer(vector_store,query,k)
+            st.text_area('LLM Expert: ',answer)
 
         st.divider()
         if 'history' not in st.session_state:
             st.session_state.history = ''
-        value = f'Q: {q} \nA: {answer}'
+        value = f'Q: {query} \nA: {answer}'
         st.session_state.history = f'{value} \n {"-" * 100} \n {st.session_state.history}'
         h = st.session_state.history
         st.button('Delete History and Pinecone Index', on_click = clear_history)
-        st.text_area(label = "Chat History", value = h, key = 'history', height = 500)
+        if not st.session_state['history']=='':
+            with st.expander("History:"):
+                st.text_area(label = "Chat History", value = h, key = 'history', height = 500)
+                
         
 
 
